@@ -629,6 +629,35 @@ const char *janus_sdp_get_codec_name(janus_sdp *sdp, int pt) {
 	return NULL;
 }
 
+//zzy
+gint32	janus_sdp_get_codec_rtx_payload(janus_sdp *sdp, gint32 pt)
+{
+	if(sdp == NULL || pt < 0)
+		return -1;
+	
+	GList *ml = sdp->m_lines;
+	while(ml) {
+		janus_sdp_mline *m = (janus_sdp_mline *)ml->data;
+		/* Look in all rtpmap attributes */
+		GList *ma = m->attributes;
+		while(ma) {
+			janus_sdp_attribute *a = (janus_sdp_attribute *)ma->data;
+			if(a->name != NULL && a->value != NULL && !strcasecmp(a->name, "fmtp") && strstr(a->value, "apt")) {
+				gint32 rtx_payload, original_payload;
+				rtx_payload = original_payload = 0;
+				sscanf(a->value, "%"SCNd32" apt=%"SCNd32"", &rtx_payload, &original_payload);
+				if (original_payload == pt) {
+					JANUS_LOG(LOG_INFO, "janus_sdp_get_codec_rtx_payload, get right RTX payload:%d \n", rtx_payload);
+					return rtx_payload;
+				}
+			}
+			ma = ma->next;
+		}
+		ml = ml->next;
+	}
+	return -1;
+}
+
 const char *janus_sdp_get_codec_rtpmap(const char *codec) {
 	if(codec == NULL)
 		return NULL;
@@ -799,7 +828,7 @@ janus_sdp *janus_sdp_generate_offer(const char *name, const char *address, ...) 
 	gboolean do_audio = TRUE, do_video = TRUE, do_data = TRUE,
 		audio_dtmf = FALSE, video_rtcpfb = TRUE, h264_fmtp = TRUE;
 	const char *audio_codec = NULL, *video_codec = NULL;
-	int audio_pt = 111, video_pt = 96;
+	int audio_pt = 111, video_pt = 100;
 	janus_sdp_mdirection audio_dir = JANUS_SDP_SENDRECV, video_dir = JANUS_SDP_SENDRECV;
 	int property = va_arg(args, int);
 	while(property != JANUS_SDP_OA_DONE) {
@@ -895,6 +924,16 @@ janus_sdp *janus_sdp_generate_offer(const char *name, const char *address, ...) 
 			a = janus_sdp_attribute_create("rtcp-fb", "%d goog-remb", video_pt);
 			m->attributes = g_list_append(m->attributes, a);
 		}
+		
+		//zzy,  support RTX
+		int rtx_pt = INNER_RTX_PAYLOAD;
+		m->ptypes = g_list_append(m->ptypes, GINT_TO_POINTER(rtx_pt));
+		a = janus_sdp_attribute_create("rtpmap", "%d rtx/90000", rtx_pt);
+		m->attributes = g_list_append(m->attributes, a);
+		a = janus_sdp_attribute_create("fmtp", "%d apt=%d", rtx_pt, video_pt);
+		m->attributes = g_list_append(m->attributes, a);
+		JANUS_LOG(LOG_INFO, "[rtx]support RTX with payload:%d in offer \n", rtx_pt);
+		
 		offer->m_lines = g_list_append(offer->m_lines, m);
 	}
 	if(do_data) {
@@ -1143,6 +1182,17 @@ janus_sdp *janus_sdp_generate_answer(janus_sdp *offer, ...) {
 					a = janus_sdp_attribute_create("rtcp-fb", "%d nack pli", pt);
 					am->attributes = g_list_append(am->attributes, a);
 					a = janus_sdp_attribute_create("rtcp-fb", "%d goog-remb", pt);
+					am->attributes = g_list_append(am->attributes, a);
+				}
+				
+				//zzy, support RTX
+				int rtx_pt = janus_sdp_get_codec_rtx_payload(offer, pt);
+				JANUS_LOG(LOG_INFO, "[rtx]select RTX with payload:%d in answer \n", rtx_pt);
+				if (rtx_pt > 0) {
+					am->ptypes = g_list_append(am->ptypes, GINT_TO_POINTER(rtx_pt));
+					a = janus_sdp_attribute_create("rtpmap", "%d rtx/90000", rtx_pt);
+					am->attributes = g_list_append(am->attributes, a);
+					a = janus_sdp_attribute_create("fmtp", "%d apt=%d", rtx_pt, pt);
 					am->attributes = g_list_append(am->attributes, a);
 				}
 			}

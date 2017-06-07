@@ -365,7 +365,7 @@ static void janus_videoroom_message_free(janus_videoroom_message *msg) {
 #define PCMU_PT		0
 #define PCMA_PT		8
 #define G722_PT		9
-#define VP8_PT		96
+#define VP8_PT		100
 #define VP9_PT		101
 #define H264_PT		107
 

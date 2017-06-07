@@ -302,6 +302,13 @@ int janus_sdp_process(void *ice_handle, janus_sdp *remote_sdp) {
 						JANUS_LOG(LOG_ERR, "[%"SCNu64"] Failed to parse SSRC attribute... (%d)\n", handle->handle_id, res);
 					}
 				}
+				//zzy, parse rtx payload
+				if(!strcasecmp(a->name, "fmtp") && strstr(a->value, "apt")) {
+					int res = janus_sdp_parse_rtx_payload(stream, (const char *)a->value);
+					if(res != 0) {
+						JANUS_LOG(LOG_ERR, "[%"SCNu64"] Failed to parse RTX attribute... (%d)\n", handle->handle_id, res);
+					}
+				}
 #ifdef HAVE_SCTP
 				if(!strcasecmp(a->name, "sctpmap")) {
 					/* TODO Parse sctpmap line to get the UDP-port value and the number of channels */
@@ -547,20 +554,37 @@ int janus_sdp_parse_ssrc(void *ice_stream, const char *ssrc_attr, int video) {
 	if(video) {
 		if(stream->video_ssrc_peer == 0) {
 			stream->video_ssrc_peer = ssrc;
-			JANUS_LOG(LOG_VERB, "[%"SCNu64"] Peer video SSRC: %u\n", handle->handle_id, stream->video_ssrc_peer);
+			JANUS_LOG(LOG_INFO, "[%"SCNu64"] Peer video SSRC: %u\n", handle->handle_id, stream->video_ssrc_peer);
 		} else if(stream->video_ssrc_peer != ssrc) {
 			/* FIXME We assume the second SSRC we get is the one Chrome associates with retransmissions, e.g.
 			 * 	a=ssrc-group:FID 586466331 2053167359 (SSRC SSRC-rtx)
 			 * SSRC group FID: https://tools.ietf.org/html/rfc3388#section-7 */
 			stream->video_ssrc_peer_rtx = ssrc;
-			JANUS_LOG(LOG_VERB, "[%"SCNu64"] Peer video SSRC (rtx): %u\n", handle->handle_id, stream->video_ssrc_peer_rtx);
+			JANUS_LOG(LOG_INFO, "[%"SCNu64"] Peer video SSRC (rtx): %u\n", handle->handle_id, stream->video_ssrc_peer_rtx);
 		}
 	} else {
 		if(stream->audio_ssrc_peer == 0) {
 			stream->audio_ssrc_peer = ssrc;
-			JANUS_LOG(LOG_VERB, "[%"SCNu64"] Peer audio SSRC: %u\n", handle->handle_id, stream->audio_ssrc_peer);
+			JANUS_LOG(LOG_INFO, "[%"SCNu64"] Peer audio SSRC: %u\n", handle->handle_id, stream->audio_ssrc_peer);
 		}
 	}
+	return 0;
+}
+
+//zzy
+int janus_sdp_parse_rtx_payload(void* ice_stream, const char* fmtp_attr) {
+	if(ice_stream == NULL || fmtp_attr == NULL)
+		return -1;
+	janus_ice_stream *stream = (janus_ice_stream *)ice_stream;
+	janus_ice_handle *handle = stream->handle;
+	if(handle == NULL)
+		return -2;
+	//JANUS_LOG(LOG_INFO, "[%"SCNu64"] fmtp: %s\n", handle->handle_id, fmtp_attr);
+	gint32 rtx_payload, original_payload;
+	rtx_payload = original_payload = 0;
+	sscanf(fmtp_attr, "%"SCNd32" apt=%"SCNd32"", &rtx_payload, &original_payload);
+	JANUS_LOG(LOG_VERB, "[rtx]parse rtx pt: %"SCNd32", original pt:%"SCNd32" \n", rtx_payload, original_payload);
+	g_hash_table_insert(stream->rtx_payloads, GUINT_TO_POINTER(rtx_payload), GUINT_TO_POINTER(original_payload));
 	return 0;
 }
 
@@ -655,7 +679,9 @@ int janus_sdp_anonymize(janus_sdp *anon) {
 		GList *purged_ptypes = NULL;
 		while(tempA) {
 			janus_sdp_attribute *a = (janus_sdp_attribute *)tempA->data;
-			if(a->value && (strstr(a->value, "red/90000") || strstr(a->value, "ulpfec/90000") || strstr(a->value, "rtx/90000"))) {
+			if(a->value && (strstr(a->value, "red/90000") || 
+									 strstr(a->value, "ulpfec/90000") 
+									/*|| strstr(a->value, "rtx/90000")*/)) {
 				int ptype = atoi(a->value);
 				JANUS_LOG(LOG_VERB, "Will remove payload type %d (%s)\n", ptype, a->value);
 				purged_ptypes = g_list_append(purged_ptypes, GINT_TO_POINTER(ptype));
@@ -907,6 +933,12 @@ char *janus_sdp_merge(void *ice_handle, janus_sdp *anon) {
 			m->attributes = g_list_append(m->attributes, a);
 		} else if(m->type == JANUS_SDP_VIDEO &&
 				(m->direction == JANUS_SDP_DEFAULT || m->direction == JANUS_SDP_SENDRECV || m->direction == JANUS_SDP_SENDONLY)) {
+			
+			//zzy
+			JANUS_LOG(LOG_INFO, "[rtx]merge sdp, setup ssrc group: %"SCNu32" and %"SCNu32" \n", stream->video_ssrc, stream->video_ssrc_rtx);
+			a = janus_sdp_attribute_create("ssrc-group", "FID %"SCNu32" %"SCNu32"", stream->video_ssrc, stream->video_ssrc_rtx);
+			m->attributes = g_list_append(m->attributes, a);
+			
 			a = janus_sdp_attribute_create("ssrc", "%"SCNu32" cname:janusvideo", stream->video_ssrc);
 			m->attributes = g_list_append(m->attributes, a);
 			a = janus_sdp_attribute_create("ssrc", "%"SCNu32" msid:janus janusv0", stream->video_ssrc);
@@ -914,6 +946,16 @@ char *janus_sdp_merge(void *ice_handle, janus_sdp *anon) {
 			a = janus_sdp_attribute_create("ssrc", "%"SCNu32" mslabel:janus", stream->video_ssrc);
 			m->attributes = g_list_append(m->attributes, a);
 			a = janus_sdp_attribute_create("ssrc", "%"SCNu32" label:janusv0", stream->video_ssrc);
+			m->attributes = g_list_append(m->attributes, a);
+			
+			//rtx
+			a = janus_sdp_attribute_create("ssrc", "%"SCNu32" cname:janusvideo", stream->video_ssrc_rtx);
+			m->attributes = g_list_append(m->attributes, a);
+			a = janus_sdp_attribute_create("ssrc", "%"SCNu32" msid:janus janusv0", stream->video_ssrc_rtx);
+			m->attributes = g_list_append(m->attributes, a);
+			a = janus_sdp_attribute_create("ssrc", "%"SCNu32" mslabel:janus", stream->video_ssrc_rtx);
+			m->attributes = g_list_append(m->attributes, a);
+			a = janus_sdp_attribute_create("ssrc", "%"SCNu32" label:janusv0", stream->video_ssrc_rtx);
 			m->attributes = g_list_append(m->attributes, a);
 		}
 		/* And now the candidates */

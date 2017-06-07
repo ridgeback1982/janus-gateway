@@ -178,4 +178,6 @@ void janus_rtp_header_update(rtp_header *header, janus_rtp_switching_context *co
  * @returns A string representation of the error code */
 const char *janus_srtp_error_str(int error);
 
+int janus_rtp_header_length(rtp_header* header);
+
 #endif

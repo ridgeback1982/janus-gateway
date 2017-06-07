@@ -351,3 +351,19 @@ const char *janus_srtp_error_str(int error) {
 		return NULL;
 	return janus_srtp_error[error];
 }
+
+int janus_rtp_header_length(rtp_header* header)
+{
+	if (!header)
+		return 0;
+	gchar* buf = (gchar*)header;
+	uint16_t header_len = 12;		//legacy first 12 bytes
+	header_len += header->csrccount * 4;
+	if (header->extension) {
+		gchar* ext = buf + header_len;
+		header_len += 4;
+		uint16_t xlen = ntohs(ext+2);
+		header_len += xlen*4;
+	}
+	return header_len;
+}

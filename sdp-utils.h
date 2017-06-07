@@ -19,6 +19,8 @@
 #include <inttypes.h>
 #include <glib.h>
 
+#define INNER_RTX_PAYLOAD 96
+
 /*! \brief Janus SDP internal object representation */
 typedef struct janus_sdp {
 	/*! \brief v= */
@@ -278,6 +280,12 @@ int janus_sdp_get_codec_pt(janus_sdp *sdp, const char *codec);
  * @param pt The payload type to find
  * @returns The codec name, if found, or NULL otherwise */
 const char *janus_sdp_get_codec_name(janus_sdp *sdp, int pt);
+
+/*! \brief Helper to get the coresponding rtx payload type
+ * @param sdp The Janus SDP instance to process
+ * @param pt The payload type to find
+ * @returns rtx payload type if OK, otherwise return -1 */
+gint32	janus_sdp_get_codec_rtx_payload(janus_sdp *sdp, gint32 pt); 
 
 /*! \brief Helper to get the rtpmap associated to a specific codec
  * @param codec The codec name, as a string (e.g., "opus")

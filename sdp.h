@@ -70,6 +70,13 @@ int janus_sdp_parse_candidate(void *stream, const char *candidate, int trickle);
  * @returns 0 in case of success, a non-zero integer in case of an error */
 int janus_sdp_parse_ssrc(void *stream, const char *ssrc_attr, int video);
 
+/*! \brief Method to parse a RTX attribute
+ * \details This method will parse a RTX attribute, and set it for the peer
+ * @param[in] stream Opaque pointer to the ICE stream this candidate refers to
+ * @param[in] fmtp_attr The RTX attribute value to parse
+ * @returns 0 in case of success, a non-zero integer in case of an error */
+int janus_sdp_parse_rtx_payload(void* stream, const char* fmtp_attr);
+
 /*! \brief Method to strip/anonymize a session description
  * @param[in,out] sdp The Janus SDP description object to strip/anonymize
  * @returns 0 in case of success, a non-zero integer in case of an error */
