@@ -1958,10 +1958,10 @@ void janus_ice_cb_nice_recv(NiceAgent *agent, guint stream_id, guint component_i
 						//it is a re-transmit packet, we should recover these fields: pt, seq and ssrc. Also remove the first 2 bytes of payload
 						gint32 header_len = janus_rtp_header_length(header);
 						//pt
-						guint32 rtx_payload = ntohs(header->type);
+						guint32 rtx_payload = header->type;
 						guint32 original_payload = GPOINTER_TO_UINT(g_hash_table_lookup(stream->rtx_payloads, GUINT_TO_POINTER(rtx_payload)));
 						JANUS_LOG(LOG_INFO, "[rtx]restore rtx pt:%d ==> %d \n", rtx_payload, original_payload); 
-						header->type = htons(original_payload);
+						header->type = original_payload;
 						//seq
 						guint16* pseq = buf+header_len;
 						guint16 seq = ntohs(*pseq);		//for debug 
@@ -2218,7 +2218,7 @@ void janus_ice_cb_nice_recv(NiceAgent *agent, guint stream_id, guint component_i
 				guint nacks_count = g_slist_length(nacks);
 				if(nacks_count) {
 					/* Handle NACK */
-					JANUS_LOG(LOG_HUGE, "[%"SCNu64"]     Just got some NACKS (%d) we should handle...\n", handle->handle_id, nacks_count);
+					JANUS_LOG(LOG_HUGE, "[%"SCNu64"]     Just got some NACKS (%d) we should handle... video:%d\n", handle->handle_id, nacks_count, video);
 					GSList *list = nacks;
 					int retransmits_cnt = 0;
 					janus_mutex_lock(&component->mutex);
@@ -2249,13 +2249,13 @@ void janus_ice_cb_nice_recv(NiceAgent *agent, guint stream_id, guint component_i
 									rtp_header *newheader = (rtp_header *)pkt->data;
 									gint32 header_len = janus_rtp_header_length(newheader);
 									guint16 ori_seq = ntohs(newheader->seq_number);		//debug
-									newheader->type = htons(INNER_RTX_PAYLOAD);
+									newheader->type = INNER_RTX_PAYLOAD;
 									newheader->seq_number = htons(stream->video_sequence_rtx++);
 									newheader->ssrc = htonl(stream->video_ssrc_rtx);
 									memmove(pkt->data+header_len+kRtxHeaderSize, pkt->data+header_len, p->length-header_len);
 									guint16*  pRTXheader = (guint16* )(pkt->data+header_len);
 									*pRTXheader = htons(ori_seq);
-									JANUS_LOG(LOG_INFO, "[rtx]encode rtx(seq:%d(%d), ssrc:%d), header len:%d\n", stream->video_sequence_rtx, ori_seq, stream->video_ssrc_rtx, header_len);
+									JANUS_LOG(LOG_HUGE, "[rtx]encode rtx(seq:%d(%d), ssrc:0x%x, pt:%d), header len:%d, \n", ntohs(newheader->seq_number), ori_seq, ntohl(newheader->ssrc), newheader->type, header_len);
 									
 									pkt->type = video ? JANUS_ICE_PACKET_VIDEO : JANUS_ICE_PACKET_AUDIO;
 									pkt->control = FALSE;
@@ -2842,6 +2842,7 @@ int janus_ice_setup_local(janus_ice_handle *handle, int offer, int audio, int vi
 	handle->streams_num = 0;
 	handle->streams = g_hash_table_new(NULL, NULL);
 	if(audio) {
+		//JANUS_LOG(LOG_INFO, "janus_ice_setup_local add audo stream\n");
 		/* Add an audio stream */
 		handle->streams_num++;
 		handle->audio_id = nice_agent_add_stream (handle->agent, janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_RTCPMUX) ? 1 : 2);
@@ -2864,6 +2865,10 @@ int janus_ice_setup_local(janus_ice_handle *handle, int offer, int audio, int vi
 		if(janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_BUNDLE)) {
 			/* If we're bundling, this stream is going to be used for video as well */
 			audio_stream->video_ssrc = janus_random_uint32();	/* FIXME Should we look for conflicts? */
+			//zzy, use "video_ssrc_rtx" and "video_sequence_rtx" to send RTX packet
+			audio_stream->video_ssrc_rtx = janus_random_uint32();	/* FIXME Should we look for conflicts? */
+			audio_stream->video_sequence_rtx = 123;
+			JANUS_LOG(LOG_INFO, "init audio stream, video_ssrc:%d, video_ssrc_rtx:%d\n", audio_stream->video_ssrc, audio_stream->video_ssrc_rtx);
 		}
 		audio_stream->video_ssrc_peer = 0;	/* FIXME Right now we don't know what this will be */
 		audio_stream->video_ssrc_peer_rtx = 0;	/* FIXME Right now we don't know what this will be */
@@ -3002,6 +3007,7 @@ int janus_ice_setup_local(janus_ice_handle *handle, int offer, int audio, int vi
 			nice_agent_attach_recv(handle->agent, handle->audio_id, 2, g_main_loop_get_context (handle->iceloop), janus_ice_cb_nice_recv, audio_rtcp);
 	}
 	if(video && (!audio || !janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_BUNDLE))) {
+		//JANUS_LOG(LOG_INFO, "janus_ice_setup_local add video stream\n");
 		/* Add a video stream */
 		handle->streams_num++;
 		handle->video_id = nice_agent_add_stream (handle->agent, janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_RTCPMUX) ? 1 : 2);
@@ -3021,7 +3027,7 @@ int janus_ice_setup_local(janus_ice_handle *handle, int offer, int audio, int vi
 		video_stream->video_ssrc = janus_random_uint32();	/* FIXME Should we look for conflicts? */
 		//zzy, use "video_ssrc_rtx" and "video_sequence_rtx" to send RTX packet
 		video_stream->video_ssrc_rtx = janus_random_uint32();	/* FIXME Should we look for conflicts? */
-		video_stream->video_sequence_rtx = 0;
+		video_stream->video_sequence_rtx = 123;
 		video_stream->video_ssrc_peer = 0;	/* FIXME Right now we don't know what this will be */
 		video_stream->video_ssrc_peer_rtx = 0;	/* FIXME Right now we don't know what this will be */
 		video_stream->rtx_payloads = g_hash_table_new(NULL, NULL);
@@ -3708,9 +3714,11 @@ void *janus_ice_send_thread(void *data) {
 					char sbuf[JANUS_BUFSIZE];
 					memcpy(sbuf, pkt->data, pkt->length);
 					if(!janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_PLAN_B)) {
-						/* Overwrite SSRC */
-						rtp_header *header = (rtp_header *)sbuf;
-						header->ssrc = htonl(video ? stream->video_ssrc : stream->audio_ssrc);
+						/* Overwrite SSRC, except rtx packet, zzy */
+						if (!pkt->retransmited) {
+							rtp_header *header = (rtp_header *)sbuf;
+							header->ssrc = htonl(video ? stream->video_ssrc : stream->audio_ssrc);
+						}
 					}
 					int protected = pkt->length;
 					int res = srtp_protect(component->dtls->srtp_out, sbuf, &protected);
@@ -3722,7 +3730,7 @@ void *janus_ice_send_thread(void *data) {
 						rtp_header *header = (rtp_header *)sbuf;
 						guint32 timestamp = ntohl(header->timestamp);
 						guint16 seq = ntohs(header->seq_number);
-						JANUS_LOG(LOG_DBG, "[%"SCNu64"] ... SRTP protect error... %s (len=%d-->%d, ts=%"SCNu32", seq=%"SCNu16")...\n", handle->handle_id, janus_srtp_error_str(res), pkt->length, protected, timestamp, seq);
+						JANUS_LOG(LOG_WARN, "[%"SCNu64"] ... SRTP protect error... %s (len=%d-->%d, ts=%"SCNu32", seq=%"SCNu16")...\n", handle->handle_id, janus_srtp_error_str(res), pkt->length, protected, timestamp, seq);
 					} else {
 						/* Shoot! */
 						int sent = nice_agent_send(handle->agent, stream->stream_id, component->component_id, protected, sbuf);
@@ -3751,7 +3759,7 @@ void *janus_ice_send_thread(void *data) {
 						}
 						if(max_nack_queue > 0) {
 							/* Save the packet for retransmissions that may be needed later 
-							NOTE: it is not encryted*/
+							NOTE: zzy, it is not encryted*/
 							if (!pkt->retransmited) {
 								janus_rtp_packet *p = (janus_rtp_packet *)g_malloc0(sizeof(janus_rtp_packet));
 								p->data = (char *)g_malloc0(pkt->length);

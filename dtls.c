@@ -694,6 +694,7 @@ void janus_dtls_srtp_incoming_msg(janus_dtls_srtp *dtls, char *buf, uint16_t len
 					dtls->local_policy.allow_repeat_tx = 0;
 #endif
 					dtls->local_policy.next = NULL;
+					dtls->local_policy.allow_repeat_tx = 1;		//zzy
 					/* Create SRTP sessions */
 					srtp_err_status_t res = srtp_create(&(dtls->srtp_in), &(dtls->remote_policy));
 					if(res != srtp_err_status_ok) {

@@ -362,7 +362,7 @@ int janus_rtp_header_length(rtp_header* header)
 	if (header->extension) {
 		gchar* ext = buf + header_len;
 		header_len += 4;
-		uint16_t xlen = ntohs(ext+2);
+		uint16_t xlen = ntohs(*(uint16_t*)(ext+2));
 		header_len += xlen*4;
 	}
 	return header_len;

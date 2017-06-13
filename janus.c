@@ -1057,6 +1057,7 @@ int janus_process_incoming_request(janus_request *request) {
 					|| janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_ALERT)) {
 				/* New session */
 				if(offer) {
+					//JANUS_LOG(LOG_INFO, "janus_process_incoming_request with message type, will setup local of OFFER type\n");
 					/* Setup ICE locally (we received an offer) */
 					if(janus_ice_setup_local(handle, offer, audio, video, data, bundle, rtcpmux, trickle) < 0) {
 						JANUS_LOG(LOG_ERR, "Error setting ICE locally\n");
@@ -1113,6 +1114,8 @@ int janus_process_incoming_request(janus_request *request) {
 								handle->audio_stream->video_ssrc = handle->video_stream->video_ssrc;
 								handle->audio_stream->video_ssrc_peer = handle->video_stream->video_ssrc_peer;
 								handle->audio_stream->video_ssrc_peer_rtx = handle->video_stream->video_ssrc_peer_rtx;
+								handle->audio_stream->video_ssrc_rtx = handle->video_stream->video_ssrc_rtx;		//zzy, rtx ssrc
+								handle->audio_stream->video_sequence_rtx = handle->video_stream->video_sequence_rtx;	//zzy, rtx seq
 								nice_agent_attach_recv(handle->agent, handle->video_stream->stream_id, 1, g_main_loop_get_context (handle->iceloop), NULL, NULL);
 								if(!janus_ice_is_rtcpmux_forced())
 									nice_agent_attach_recv(handle->agent, handle->video_stream->stream_id, 2, g_main_loop_get_context (handle->iceloop), NULL, NULL);
@@ -2652,6 +2655,7 @@ int janus_plugin_push_event(janus_plugin_session *plugin_session, janus_plugin *
 	const char *sdp = json_string_value(json_object_get(jsep, "sdp"));
 	json_t *merged_jsep = NULL;
 	if(sdp_type != NULL && sdp != NULL) {
+		//JANUS_LOG(LOG_INFO, "janus_plugin_push_event will handle sdp, type:%s\n", sdp_type);
 		merged_jsep = janus_plugin_handle_sdp(plugin_session, plugin, sdp_type, sdp);
 		if(merged_jsep == NULL) {
 			if(ice_handle == NULL || janus_flags_is_set(&ice_handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_STOP)
@@ -2693,6 +2697,7 @@ int janus_plugin_push_event(janus_plugin_session *plugin_session, janus_plugin *
 }
 
 json_t *janus_plugin_handle_sdp(janus_plugin_session *plugin_session, janus_plugin *plugin, const char *sdp_type, const char *sdp) {
+	//JANUS_LOG(LOG_INFO, "janus_plugin_handle_sdp in, with sdp type:%s\n", sdp_type);
 	if(!plugin_session || plugin_session < (janus_plugin_session *)0x1000 ||
 			!janus_plugin_session_is_alive(plugin_session) || plugin_session->stopped ||
 			plugin == NULL || sdp_type == NULL || sdp == NULL) {
@@ -2763,6 +2768,7 @@ json_t *janus_plugin_handle_sdp(janus_plugin_session *plugin_session, janus_plug
 		}
 		if(ice_handle->agent == NULL) {
 			/* Process SDP in order to setup ICE locally (this is going to result in an answer from the browser) */
+			//JANUS_LOG(LOG_INFO, "janus_plugin_handle_sdp, setup local of ANSWER type\n");
 			if(janus_ice_setup_local(ice_handle, 0, audio, video, data, bundle, rtcpmux, trickle) < 0) {
 				JANUS_LOG(LOG_ERR, "[%"SCNu64"] Error setting ICE locally\n", ice_handle->handle_id);
 				janus_sdp_free(parsed_sdp);
@@ -2865,6 +2871,8 @@ json_t *janus_plugin_handle_sdp(janus_plugin_session *plugin_session, janus_plug
 						ice_handle->audio_stream->video_ssrc = ice_handle->video_stream->video_ssrc;
 						ice_handle->audio_stream->video_ssrc_peer = ice_handle->video_stream->video_ssrc_peer;
 						ice_handle->audio_stream->video_ssrc_peer_rtx = ice_handle->video_stream->video_ssrc_peer_rtx;
+						ice_handle->audio_stream->video_ssrc_rtx = ice_handle->video_stream->video_ssrc_rtx;		//zzy, rtx ssrc
+						ice_handle->audio_stream->video_sequence_rtx = ice_handle->video_stream->video_sequence_rtx;	//zzy, rtx seq
 						nice_agent_attach_recv(ice_handle->agent, ice_handle->video_stream->stream_id, 1, g_main_loop_get_context (ice_handle->iceloop), NULL, NULL);
 						if(!janus_ice_is_rtcpmux_forced())
 							nice_agent_attach_recv(ice_handle->agent, ice_handle->video_stream->stream_id, 2, g_main_loop_get_context (ice_handle->iceloop), NULL, NULL);
