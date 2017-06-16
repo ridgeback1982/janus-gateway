@@ -1859,7 +1859,7 @@ void janus_ice_cb_nice_recv(NiceAgent *agent, guint stream_id, guint component_i
 	/* What is this? */
 	if (janus_is_dtls(buf) || (!janus_is_rtp(buf) && !janus_is_rtcp(buf))) {
 		/* This is DTLS: either handshake stuff, or data coming from SCTP DataChannels */
-		JANUS_LOG(LOG_HUGE, "[%"SCNu64"] Looks like DTLS!\n", handle->handle_id);
+		JANUS_LOG(LOG_WARN, "[%"SCNu64"] Looks like DTLS!\n", handle->handle_id);
 		janus_dtls_srtp_incoming_msg(component->dtls, buf, len);
 		/* Update stats (TODO Do the same for the last second window as well) */
 		component->in_stats.data_packets++;
@@ -1867,8 +1867,10 @@ void janus_ice_cb_nice_recv(NiceAgent *agent, guint stream_id, guint component_i
 		return;
 	}
 	/* Not DTLS... RTP or RTCP? (http://tools.ietf.org/html/rfc5761#section-4) */
-	if(len < 12)
+	if(len < 12) {
+		JANUS_LOG(LOG_WARN, "[%"SCNu64"] Packet too small\n", handle->handle_id);
 		return;	/* Definitely nothing useful */
+	}
 	if(component_id == 1 && (!janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_RTCPMUX) || janus_is_rtp(buf))) {
 		/* FIXME If rtcp-mux is not used, a first component is always RTP; otherwise, we need to check */
 		//~ JANUS_LOG(LOG_HUGE, "[%"SCNu64"]  Got an RTP packet (%s stream)!\n", handle->handle_id,
@@ -1878,6 +1880,7 @@ void janus_ice_cb_nice_recv(NiceAgent *agent, guint stream_id, guint component_i
 		} else {
 			rtp_header *header = (rtp_header *)buf;
 			guint32 packet_ssrc = ntohl(header->ssrc);
+			//JANUS_LOG(LOG_INFO, "[%"SCNu64"] receive packet(ssrc:0x%x, seq:%d)\n", handle->handle_id, packet_ssrc, ntohs(header->seq_number));
 			/* Is this audio or video? */
 			int video = 0;
 			if(!janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_BUNDLE)) {
@@ -1926,11 +1929,12 @@ void janus_ice_cb_nice_recv(NiceAgent *agent, guint stream_id, guint component_i
 						return;
 					}
 				}
-				if(stream->video_ssrc_peer_rtx == packet_ssrc) {
-					/* FIXME This is a video retransmission: set the regular peer SSRC so
-					 * that we avoid outgoing SRTP errors in case we got the packet already */
-					header->ssrc = htonl(stream->video_ssrc_peer);
-				}
+				//zzy,  disable for srtp unprotect
+				//if(stream->video_ssrc_peer_rtx == packet_ssrc) {
+				//	/* FIXME This is a video retransmission: set the regular peer SSRC so
+				//	 * that we avoid outgoing SRTP errors in case we got the packet already */
+				//	header->ssrc = htonl(stream->video_ssrc_peer);
+				//}
 				//~ JANUS_LOG(LOG_VERB, "[RTP] Bundling: this is %s (video=%"SCNu64", audio=%"SCNu64", got %ld)\n",
 					//~ video ? "video" : "audio", stream->video_ssrc_peer, stream->audio_ssrc_peer, ntohl(header->ssrc));
 			}
@@ -1938,7 +1942,8 @@ void janus_ice_cb_nice_recv(NiceAgent *agent, guint stream_id, guint component_i
 			int buflen = len;
 			srtp_err_status_t res = srtp_unprotect(component->dtls->srtp_in, buf, &buflen);
 			if(res != srtp_err_status_ok) {
-				if(res != srtp_err_status_replay_fail && res != srtp_err_status_replay_old) {
+				//if(res != srtp_err_status_replay_fail && res != srtp_err_status_replay_old) 
+				{
 					/* Only print the error if it's not a 'replay fail' or 'replay old' (which is probably just the result of us NACKing a packet) */
 					rtp_header *header = (rtp_header *)buf;
 					guint32 timestamp = ntohl(header->timestamp);
@@ -1949,10 +1954,11 @@ void janus_ice_cb_nice_recv(NiceAgent *agent, guint stream_id, guint component_i
 				if(video) {
 					if(stream->video_ssrc_peer == 0) {
 						stream->video_ssrc_peer = ntohl(header->ssrc);
-						JANUS_LOG(LOG_VERB, "[%"SCNu64"]     Peer video SSRC: %u\n", handle->handle_id, stream->video_ssrc_peer);
+						JANUS_LOG(LOG_INFO, "[%"SCNu64"]     Peer video SSRC: %u\n", handle->handle_id, stream->video_ssrc_peer);
 					}
 					
-					//zzy
+					//zzy, rtx decode
+					//JANUS_LOG(LOG_INFO, "[%"SCNu64"] receive video packet(ssrc:0x%x, seq:%d), peer:0x%x, peerrtx:0x%x\n", handle->handle_id, packet_ssrc, ntohs(header->seq_number), stream->video_ssrc_peer, stream->video_ssrc_peer_rtx);
 					if(stream->video_ssrc_peer_rtx == packet_ssrc) 
 					{
 						//it is a re-transmit packet, we should recover these fields: pt, seq and ssrc. Also remove the first 2 bytes of payload
@@ -1960,15 +1966,15 @@ void janus_ice_cb_nice_recv(NiceAgent *agent, guint stream_id, guint component_i
 						//pt
 						guint32 rtx_payload = header->type;
 						guint32 original_payload = GPOINTER_TO_UINT(g_hash_table_lookup(stream->rtx_payloads, GUINT_TO_POINTER(rtx_payload)));
-						JANUS_LOG(LOG_INFO, "[rtx]restore rtx pt:%d ==> %d \n", rtx_payload, original_payload); 
+						JANUS_LOG(LOG_VERB, "[rtx]restore rtx pt:%d ==> %d \n", rtx_payload, original_payload); 
 						header->type = original_payload;
 						//seq
 						guint16* pseq = buf+header_len;
 						guint16 seq = ntohs(*pseq);		//for debug 
-						JANUS_LOG(LOG_INFO, "[rtx]restore seq:%d ==> %d \n", ntohs(header->seq_number), seq); 
+						JANUS_LOG(LOG_VERB, "[rtx]restore seq:%d ==> %d \n", ntohs(header->seq_number), seq); 
 						header->seq_number = htons(seq);
 						//ssrc
-						JANUS_LOG(LOG_INFO, "[rtx]restore ssrc:%d ==> %d \n", ntohl(header->ssrc), stream->video_ssrc_peer); 
+						JANUS_LOG(LOG_VERB, "[rtx]restore ssrc:%d ==> %d \n", ntohl(header->ssrc), stream->video_ssrc_peer); 
 						header->ssrc = htonl(stream->video_ssrc_peer);
 						//move payload
 						memmove(buf+header_len, buf+header_len+kRtxHeaderSize, buflen-header_len-kRtxHeaderSize);
@@ -2107,7 +2113,7 @@ void janus_ice_cb_nice_recv(NiceAgent *agent, guint stream_id, guint component_i
 				guint nacks_count = g_slist_length(nacks);
 				if(nacks_count) {
 					/* Generate a NACK and send it */
-					JANUS_LOG(LOG_DBG, "[%"SCNu64"] now sending NACK for %u missed packets\n", handle->handle_id, nacks_count);
+					//JANUS_LOG(LOG_INFO, "[%"SCNu64"] now sending NACK for %u missed packets\n", handle->handle_id, nacks_count);
 					char nackbuf[120];
 					int res = janus_rtcp_nacks(nackbuf, sizeof(nackbuf), nacks);
 					if(res > 0)
