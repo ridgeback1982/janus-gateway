@@ -1,3 +1,11 @@
+Janus Gateway is great, but not so good working with WebRTC client in QoS.
+There is three main tasks to improve its QoS:
+1. Support RTX payload
+2. Support FEC
+3. Support good REMB
+
+
+
 Janus WebRTC Gateway
 ====================
 
