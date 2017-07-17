@@ -360,6 +360,10 @@ struct janus_ice_stream {
 	GList *video_payload_types;
 	/*! \brief RTP payload type of this stream */
 	gint payload_type;
+	//zzy
+	gint32 video_red_payload;
+	gint32 video_ulpfec_payload;
+	void*	video_fec;
 	/*! \brief RTCP context for the audio stream (may be bundled) */
 	rtcp_context *audio_rtcp_ctx;
 	/*! \brief RTCP context for the video stream (may be bundled) */
@@ -586,8 +590,6 @@ void janus_ice_relay_data(janus_ice_handle *handle, char *buf, int len);
  * @param[in] buffer The message data (buffer)
  * @param[in] length The buffer lenght */
 void janus_ice_incoming_data(janus_ice_handle *handle, char *buffer, int length);
-///@}
-
 
 /** @name Janus ICE handle helpers
  */

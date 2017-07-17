@@ -130,6 +130,8 @@ janus_SOURCES = \
 	utils.h \
 	version.c \
 	version.h \
+	fec_lite.c \
+	fec_lite.h \
 	plugins/plugin.c \
 	plugins/plugin.h \
 	transports/transport.h \
@@ -144,6 +146,7 @@ janus_CFLAGS = \
 	-DEVENTDIR=\"$(eventdir)\" \
 	-DCONFDIR=\"$(confdir)\" \
 	$(BORINGSSL_CFLAGS) \
+	-std=c99 \
 	$(NULL)
 
 janus_LDADD = \

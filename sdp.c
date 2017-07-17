@@ -22,7 +22,7 @@
 #include "sdp.h"
 #include "utils.h"
 #include "debug.h"
-
+#include "fec_lite.h"
 
 /* Pre-parse SDP: is this SDP valid? how many audio/video lines? any features to take into account? */
 janus_sdp *janus_sdp_preparse(const char *jsep_sdp, char *error_str, size_t errlen,
@@ -309,6 +309,23 @@ int janus_sdp_process(void *ice_handle, janus_sdp *remote_sdp) {
 						JANUS_LOG(LOG_ERR, "[%"SCNu64"] Failed to parse RTX attribute... (%d)\n", handle->handle_id, res);
 					}
 				}
+				//zzy, parse red payload
+				if(!strcasecmp(a->name, "rtpmap") && strstr(a->value, "red")) {
+					int res = janus_sdp_parse_red_payload(stream, (const char *)a->value);
+					if(res != 0) {
+						JANUS_LOG(LOG_ERR, "[%"SCNu64"] Failed to parse RED attribute... (%d)\n", handle->handle_id, res);
+					}
+				}
+				//zzy, parse fec payload
+				if(!strcasecmp(a->name, "rtpmap") && strstr(a->value, "ulpfec")) {
+					int res = janus_sdp_parse_ulpfec_payload(stream, (const char *)a->value);
+					if(res != 0) {
+						JANUS_LOG(LOG_ERR, "[%"SCNu64"] Failed to parse FEC attribute... (%d)\n", handle->handle_id, res);
+					} else {
+						stream->video_fec = janus_fec_create();
+						JANUS_LOG(LOG_INFO, "[%"SCNu64"] Create FEC module\n", handle->handle_id);
+					}
+				}
 #ifdef HAVE_SCTP
 				if(!strcasecmp(a->name, "sctpmap")) {
 					/* TODO Parse sctpmap line to get the UDP-port value and the number of channels */
@@ -571,7 +588,7 @@ int janus_sdp_parse_ssrc(void *ice_stream, const char *ssrc_attr, int video) {
 	return 0;
 }
 
-//zzy
+//zzy, parse rtx payload
 int janus_sdp_parse_rtx_payload(void* ice_stream, const char* fmtp_attr) {
 	if(ice_stream == NULL || fmtp_attr == NULL)
 		return -1;
@@ -585,6 +602,38 @@ int janus_sdp_parse_rtx_payload(void* ice_stream, const char* fmtp_attr) {
 	sscanf(fmtp_attr, "%"SCNd32" apt=%"SCNd32"", &rtx_payload, &original_payload);
 	JANUS_LOG(LOG_VERB, "[rtx]parse rtx pt: %"SCNd32", original pt:%"SCNd32" \n", rtx_payload, original_payload);
 	g_hash_table_insert(stream->rtx_payloads, GUINT_TO_POINTER(rtx_payload), GUINT_TO_POINTER(original_payload));
+	return 0;
+}
+
+//zzy, parse red payload
+int janus_sdp_parse_red_payload(void* ice_stream, const char* rtpmap_attr) {
+	if(ice_stream == NULL || rtpmap_attr == NULL)
+		return -1;
+	janus_ice_stream *stream = (janus_ice_stream *)ice_stream;
+	janus_ice_handle *handle = stream->handle;
+	if(handle == NULL)
+		return -2;
+	//JANUS_LOG(LOG_INFO, "[%"SCNu64"] fmtp: %s\n", handle->handle_id, fmtp_attr);
+	gint32 red_payload = 0;
+	sscanf(rtpmap_attr, "%"SCNd32" red/90000", &red_payload);
+	stream->video_red_payload = red_payload;
+	JANUS_LOG(LOG_INFO, "[red]parse red pt:%"SCNd32" \n", red_payload);
+	return 0;
+}
+
+//zzy, parse fec payload
+int janus_sdp_parse_ulpfec_payload(void* ice_stream, const char* rtpmap_attr) {
+	if(ice_stream == NULL || rtpmap_attr == NULL)
+		return -1;
+	janus_ice_stream *stream = (janus_ice_stream *)ice_stream;
+	janus_ice_handle *handle = stream->handle;
+	if(handle == NULL)
+		return -2;
+	//JANUS_LOG(LOG_INFO, "[%"SCNu64"] fmtp: %s\n", handle->handle_id, fmtp_attr);
+	gint32 fec_payload = 0;
+	sscanf(rtpmap_attr, "%"SCNd32" ulpfec/90000", &fec_payload);
+	stream->video_ulpfec_payload = fec_payload;
+	JANUS_LOG(LOG_INFO, "[fec]parse fec pt:%"SCNd32" \n", fec_payload);
 	return 0;
 }
 
@@ -675,15 +724,16 @@ int janus_sdp_anonymize(janus_sdp *anon) {
 			tempA = tempA->next;
 		}
 		/* Also remove attributes/formats we know we don't support (or don't want to support) now */
+#if 0
 		tempA = m->attributes;
 		GList *purged_ptypes = NULL;
 		while(tempA) {
 			janus_sdp_attribute *a = (janus_sdp_attribute *)tempA->data;
 			if(a->value && (strstr(a->value, "red/90000") || 
 									 strstr(a->value, "ulpfec/90000") 
-									/*|| strstr(a->value, "rtx/90000")*/)) {
+									|| strstr(a->value, "rtx/90000"))) {
 				int ptype = atoi(a->value);
-				JANUS_LOG(LOG_VERB, "Will remove payload type %d (%s)\n", ptype, a->value);
+				JANUS_LOG(LOG_WARN, "Will remove payload type %d (%s)\n", ptype, a->value);
 				purged_ptypes = g_list_append(purged_ptypes, GINT_TO_POINTER(ptype));
 			}
 			tempA = tempA->next;
@@ -698,6 +748,7 @@ int janus_sdp_anonymize(janus_sdp *anon) {
 			g_list_free(purged_ptypes);
 			purged_ptypes = NULL;
 		}
+#endif
 		temp = temp->next;
 	}
 

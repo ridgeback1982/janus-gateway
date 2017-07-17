@@ -35,6 +35,7 @@
 #include "ip-utils.h"
 #include "events.h"
 #include "sdp-utils.h"
+#include "fec_lite.h"
 
 #define kRtxHeaderSize 2
 
@@ -2247,7 +2248,8 @@ void janus_ice_cb_nice_recv(NiceAgent *agent, guint stream_id, guint component_i
 									retransmits_cnt++;
 									/* Enqueue it */
 									janus_ice_queued_packet *pkt = (janus_ice_queued_packet *)g_malloc0(sizeof(janus_ice_queued_packet));
-									pkt->length = p->length+kRtxHeaderSize;		//zzy,  for the RTX header
+									//if RED is enabled
+									pkt->length = p->length-kRedPrimaryHeaderSize+kRtxHeaderSize;		//zzy,  for the RTX header
 									pkt->data = g_malloc0(pkt->length);
 									memcpy(pkt->data, p->data, p->length);
 									
@@ -2258,17 +2260,21 @@ void janus_ice_cb_nice_recv(NiceAgent *agent, guint stream_id, guint component_i
 									newheader->type = INNER_RTX_PAYLOAD;
 									newheader->seq_number = htons(stream->video_sequence_rtx++);
 									newheader->ssrc = htonl(stream->video_ssrc_rtx);
-									memmove(pkt->data+header_len+kRtxHeaderSize, pkt->data+header_len, p->length-header_len);
+									//if RED is enabled
+									memmove(pkt->data+header_len+kRtxHeaderSize, pkt->data+header_len+kRedPrimaryHeaderSize, p->length-header_len-kRedPrimaryHeaderSize);
 									guint16*  pRTXheader = (guint16* )(pkt->data+header_len);
 									*pRTXheader = htons(ori_seq);
-									JANUS_LOG(LOG_HUGE, "[rtx]encode rtx(seq:%d(%d), ssrc:0x%x, pt:%d), header len:%d, \n", ntohs(newheader->seq_number), ori_seq, ntohl(newheader->ssrc), newheader->type, header_len);
+									JANUS_LOG(LOG_HUGE, "[rtx]encode rtx(seq:%d(%d), marker:%d, ssrc:0x%x, pt:%d), header len:%d\n", ntohs(newheader->seq_number), ori_seq, newheader->markerbit, 
+											  ntohl(newheader->ssrc), newheader->type, header_len);
 									
 									pkt->type = video ? JANUS_ICE_PACKET_VIDEO : JANUS_ICE_PACKET_AUDIO;
 									pkt->control = FALSE;
 									pkt->encrypted = FALSE;
 									pkt->retransmited = TRUE;	/*flag to say: this is a retrasnmit packet*/
-									if(handle->queued_packets != NULL)
+									if(handle->queued_packets != NULL) {
+										//JANUS_LOG(LOG_INFO, "[rtx]push rtx packet to queue, size:%d\n", g_async_queue_length(handle->queued_packets));
 										g_async_queue_push(handle->queued_packets, pkt);
+									}
 									break;
 								}
 							}
@@ -2879,6 +2885,9 @@ int janus_ice_setup_local(janus_ice_handle *handle, int offer, int audio, int vi
 		audio_stream->video_ssrc_peer = 0;	/* FIXME Right now we don't know what this will be */
 		audio_stream->video_ssrc_peer_rtx = 0;	/* FIXME Right now we don't know what this will be */
 		audio_stream->rtx_payloads = g_hash_table_new(NULL, NULL);
+		audio_stream->video_red_payload = 0;
+		audio_stream->video_ulpfec_payload = 0;
+		audio_stream->video_fec = NULL;
 		audio_stream->audio_rtcp_ctx = g_malloc0(sizeof(rtcp_context));
 		audio_stream->audio_rtcp_ctx->tb = 48000;	/* May change later */
 		audio_stream->video_rtcp_ctx = g_malloc0(sizeof(rtcp_context));
@@ -3037,6 +3046,8 @@ int janus_ice_setup_local(janus_ice_handle *handle, int offer, int audio, int vi
 		video_stream->video_ssrc_peer = 0;	/* FIXME Right now we don't know what this will be */
 		video_stream->video_ssrc_peer_rtx = 0;	/* FIXME Right now we don't know what this will be */
 		video_stream->rtx_payloads = g_hash_table_new(NULL, NULL);
+		video_stream->video_red_payload = 0;
+		video_stream->video_fec = NULL;
 		video_stream->audio_ssrc = 0;
 		video_stream->audio_ssrc_peer = 0;
 		video_stream->video_rtcp_ctx = g_malloc0(sizeof(rtcp_context));
@@ -3721,8 +3732,8 @@ void *janus_ice_send_thread(void *data) {
 					memcpy(sbuf, pkt->data, pkt->length);
 					if(!janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_PLAN_B)) {
 						/* Overwrite SSRC, except rtx packet, zzy */
+						rtp_header *header = (rtp_header *)sbuf;
 						if (!pkt->retransmited) {
-							rtp_header *header = (rtp_header *)sbuf;
 							header->ssrc = htonl(video ? stream->video_ssrc : stream->audio_ssrc);
 						}
 					}
@@ -3766,7 +3777,7 @@ void *janus_ice_send_thread(void *data) {
 						if(max_nack_queue > 0) {
 							/* Save the packet for retransmissions that may be needed later 
 							NOTE: zzy, it is not encryted*/
-							if (!pkt->retransmited) {
+							if (!pkt->retransmited && video) {
 								janus_rtp_packet *p = (janus_rtp_packet *)g_malloc0(sizeof(janus_rtp_packet));
 								p->data = (char *)g_malloc0(pkt->length);
 								memcpy(p->data, pkt->data, pkt->length);
@@ -3775,6 +3786,11 @@ void *janus_ice_send_thread(void *data) {
 								p->last_retransmit = 0;
 								janus_mutex_lock(&component->mutex);
 								component->retransmit_buffer = g_list_append(component->retransmit_buffer, p);
+								/*JANUS_LOG(LOG_INFO, "dbg: send video packet, 0x%x,0x%x,0x%x,0x%x | 0x%x,0x%x,0x%x,0x%x | 0x%x,0x%x,0x%x,0x%x | 0x%x,0x%x,0x%x,0x%x \n", 
+										  (unsigned char)p->data[0], (unsigned char)p->data[1], (unsigned char)p->data[2], (unsigned char)p->data[3],
+										 (unsigned char)p->data[4], (unsigned char)p->data[5], (unsigned char)p->data[6], (unsigned char)p->data[7],
+										(unsigned char)p->data[8], (unsigned char)p->data[9], (unsigned char)p->data[10], (unsigned char)p->data[11],
+									   (unsigned char)p->data[12], (unsigned char)p->data[13], (unsigned char)p->data[14], (unsigned char)p->data[15]); */
 								janus_mutex_unlock(&component->mutex);
 							}
 						}
@@ -3845,12 +3861,7 @@ void *janus_ice_send_thread(void *data) {
 	return NULL;
 }
 
-void janus_ice_relay_rtp(janus_ice_handle *handle, int video, char *buf, int len) {
-	if(!handle || buf == NULL || len < 1)
-		return;
-	if((!video && !janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_HAS_AUDIO))
-			|| (video && !janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_HAS_VIDEO)))
-		return;
+void queue_rtp_packet(janus_ice_handle *handle, int video, char *buf, int len) {
 	/* Queue this packet */
 	janus_ice_queued_packet *pkt = (janus_ice_queued_packet *)g_malloc0(sizeof(janus_ice_queued_packet));
 	pkt->data = g_malloc0(len);
@@ -3862,6 +3873,90 @@ void janus_ice_relay_rtp(janus_ice_handle *handle, int video, char *buf, int len
 	pkt->retransmited = FALSE;
 	if(handle->queued_packets != NULL)
 		g_async_queue_push(handle->queued_packets, pkt);
+}
+	   
+void janus_ice_relay_rtp(janus_ice_handle *handle, int video, char *buf, int len) {
+	if(!handle || buf == NULL || len < 1)
+		return;
+	if((!video && !janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_HAS_AUDIO))
+			|| (video && !janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_HAS_VIDEO)))
+		return;
+	
+	//zzy
+	if (video) {
+		rtp_header* header = (rtp_header*)buf;
+		gint32 rtp_header_len = janus_rtp_header_length(header);
+		gint32 rtp_payload_len = len - rtp_header_len;
+		janus_ice_stream *stream = janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_BUNDLE) ? (handle->audio_stream ? handle->audio_stream : handle->video_stream) : (handle->video_stream);
+		guint16 media_pkt_seq = ntohs(header->seq_number);
+		//calculate plus caused by FEC packets
+		guint32 plus = getSequencePlusFromFecMap(&((janus_fec_lite*)stream->video_fec)->seq_map, media_pkt_seq);
+		//JANUS_LOG(LOG_INFO, "[fec]relay rtp, get sequence plus, %d, %d\n", plus, media_pkt_seq);
+		header->seq_number = htons(media_pkt_seq + plus);
+		gboolean protect = (stream->video_fec != NULL);
+		//protect = false;	//debug
+		if (protect) {
+			//JANUS_LOG(LOG_INFO, "[fec]relay rtp, input  media  packet\n");
+			janus_fec_input_media_packet(stream->video_fec, buf, rtp_header_len+rtp_payload_len);
+			//queue red media packet
+			//JANUS_LOG(LOG_INFO, "[fec]relay rtp, encode red for MEDIA packet\n");
+			len = janus_red_encode_media_packet(buf, rtp_payload_len, rtp_header_len, stream->video_red_payload);
+			//JANUS_LOG(LOG_INFO, "[fec]relay rtp, queue media-RED list\n");
+			queue_rtp_packet(handle, video, buf, len);
+			
+			GList* media_packet_list = NULL;
+			//JANUS_LOG(LOG_INFO, "[fec]relay rtp, check  good media list\n");
+			if (janus_fec_get_good_media_packet_list(stream->video_fec, &media_packet_list) > 0) {
+				//generate fec list from good media list
+				guint rate = 25;
+				GList* fec_packet_list = NULL;
+				janus_fec_generate_fec(stream->video_fec, media_packet_list, rate, &fec_packet_list);
+				gint fec_list_size = g_list_length(fec_packet_list);
+				//JANUS_LOG(LOG_INFO, "[fec]relay rtp, generate fec list, size:%d\n", fec_list_size);
+				
+				//RED encode
+				janus_red_encode_fec_packet_list(media_packet_list, fec_packet_list, rtp_header_len, stream->video_red_payload, stream->video_ulpfec_payload);
+				//JANUS_LOG(LOG_INFO, "[fec]relay rtp, encode red for FEC packet\n");
+				
+				//update the fec-sequence map
+				GList* last = g_list_last(media_packet_list);
+				guint8* pkt = (guint8*)((packet*)last->data)->data;
+				guint16* seq_p = (guint16*)(&pkt[2]);
+				guint16 last_seq = ntohs(*seq_p);
+				guint32 plus_t = getSequencePlusFromFecMap(&((janus_fec_lite*)stream->video_fec)->seq_map, last_seq);		//tricky
+				updateFecMap(&((janus_fec_lite*)stream->video_fec)->seq_map, last_seq-plus_t, fec_list_size);								//use the original(not fec-seq-modified) sequence number
+				JANUS_LOG(LOG_HUGE, "[fec]relay rtp, update fec map, last media seq:%d, fec count:%d\n", last_seq-plus_t, fec_list_size);
+				
+				//free media packet list
+				while(media_packet_list) {
+					GList* head = media_packet_list;
+					media_packet_list = g_list_remove_link(media_packet_list, head);
+					//todo: it better goto a mem pool
+					free((packet*)head->data);
+					head->data = NULL;
+					g_list_free(head);
+				}
+				
+				//queue fec packets
+				//JANUS_LOG(LOG_INFO, "[fec]relay rtp, queue fec-RED list\n");
+				while(fec_packet_list) {
+					GList* head = fec_packet_list;
+					fec_packet_list = g_list_remove_link(fec_packet_list, head);
+					queue_rtp_packet(handle, video, ((packet*)head->data)->data, ((packet*)head->data)->length);
+					g_list_free(head);
+				}
+			}
+		} else {
+			//queue red media packet
+			//JANUS_LOG(LOG_INFO, "ice relay media rtp, %d,%d,%d \n", rtp_payload_len, rtp_header_len, stream->video_red_payload);
+			len = janus_red_encode_media_packet(buf, rtp_payload_len, rtp_header_len, stream->video_red_payload);
+			queue_rtp_packet(handle, video, buf, len);
+		}
+	}
+	else {
+		/* Queue this packet */
+		queue_rtp_packet(handle, video, buf, len);
+	}
 }
 
 void janus_ice_relay_rtcp_internal(janus_ice_handle *handle, int video, char *buf, int len, gboolean filter_rtcp) {

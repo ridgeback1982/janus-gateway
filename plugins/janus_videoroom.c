@@ -2450,7 +2450,7 @@ void janus_videoroom_incoming_rtcp(janus_plugin_session *handle, int video, char
 				if(p && p->session) {
 					char rtcpbuf[20];
 					janus_rtcp_fir((char *)&rtcpbuf, 20, &p->fir_seq);
-					JANUS_LOG(LOG_VERB, "Got a FIR from a listener, forwarding it to %"SCNu64" (%s)\n", p->user_id, p->display ? p->display : "??");
+					JANUS_LOG(LOG_INFO, "Got a FIR from a listener, forwarding it to %"SCNu64" (%s)\n", p->user_id, p->display ? p->display : "??");
 					gateway->relay_rtcp(p->session->handle, 1, rtcpbuf, 20);
 				}
 			}
@@ -2462,7 +2462,7 @@ void janus_videoroom_incoming_rtcp(janus_plugin_session *handle, int video, char
 				if(p && p->session) {
 					char rtcpbuf[12];
 					janus_rtcp_pli((char *)&rtcpbuf, 12);
-					JANUS_LOG(LOG_VERB, "Got a PLI from a listener, forwarding it to %"SCNu64" (%s)\n", p->user_id, p->display ? p->display : "??");
+					JANUS_LOG(LOG_INFO, "Got a PLI from a listener, forwarding it to %"SCNu64" (%s)\n", p->user_id, p->display ? p->display : "??");
 					gateway->relay_rtcp(p->session->handle, 1, rtcpbuf, 12);
 				}
 			}
