@@ -342,6 +342,7 @@ struct janus_ice_stream {
 	guint32 audio_ssrc;
 	/*! \brief Video SSRC of the gateway for this stream (may be bundled) */
 	guint32 video_ssrc;
+	gboolean video_support_rtx;
 	/*! \brief RTX video SSRC of the gateway for this stream (may be bundled) */
 	guint32 video_ssrc_rtx;
 	/*! \brief RTX video sequence of the gateway for this stream (may be bundled) */
@@ -363,7 +364,9 @@ struct janus_ice_stream {
 	//zzy
 	gint32 video_red_payload;
 	gint32 video_ulpfec_payload;
-	void*	video_fec;
+	gint32 video_rtx_red_payload;
+	void*	video_fec_enc;
+	void*	video_fec_dec;
 	/*! \brief RTCP context for the audio stream (may be bundled) */
 	rtcp_context *audio_rtcp_ctx;
 	/*! \brief RTCP context for the video stream (may be bundled) */

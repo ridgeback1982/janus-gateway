@@ -1113,12 +1113,15 @@ int janus_process_incoming_request(janus_request *request) {
 							if(handle->streams && handle->video_stream) {
 								handle->audio_stream->video_ssrc = handle->video_stream->video_ssrc;
 								handle->audio_stream->video_ssrc_peer = handle->video_stream->video_ssrc_peer;
+								handle->audio_stream->video_support_rtx = handle->video_stream->video_support_rtx;
 								handle->audio_stream->video_ssrc_peer_rtx = handle->video_stream->video_ssrc_peer_rtx;
 								handle->audio_stream->video_ssrc_rtx = handle->video_stream->video_ssrc_rtx;		//zzy, rtx ssrc
 								handle->audio_stream->video_sequence_rtx = handle->video_stream->video_sequence_rtx;	//zzy, rtx seq
 								handle->audio_stream->video_red_payload = handle->video_stream->video_red_payload;	//zzy, red payload
 								handle->audio_stream->video_ulpfec_payload = handle->video_stream->video_ulpfec_payload;	//zzy, fec payload
-								handle->audio_stream->video_fec = handle->video_stream->video_fec;	//zzy, fec
+								handle->audio_stream->video_rtx_red_payload = handle->video_stream->video_rtx_red_payload;
+								handle->audio_stream->video_fec_enc = handle->video_stream->video_fec_enc;	//zzy, fec
+								handle->audio_stream->video_fec_dec = handle->video_stream->video_fec_dec;	//zzy, fec
 								nice_agent_attach_recv(handle->agent, handle->video_stream->stream_id, 1, g_main_loop_get_context (handle->iceloop), NULL, NULL);
 								if(!janus_ice_is_rtcpmux_forced())
 									nice_agent_attach_recv(handle->agent, handle->video_stream->stream_id, 2, g_main_loop_get_context (handle->iceloop), NULL, NULL);
@@ -2874,11 +2877,14 @@ json_t *janus_plugin_handle_sdp(janus_plugin_session *plugin_session, janus_plug
 						ice_handle->audio_stream->video_ssrc = ice_handle->video_stream->video_ssrc;
 						ice_handle->audio_stream->video_ssrc_peer = ice_handle->video_stream->video_ssrc_peer;
 						ice_handle->audio_stream->video_ssrc_peer_rtx = ice_handle->video_stream->video_ssrc_peer_rtx;
+						ice_handle->audio_stream->video_support_rtx = ice_handle->video_stream->video_support_rtx;
 						ice_handle->audio_stream->video_ssrc_rtx = ice_handle->video_stream->video_ssrc_rtx;		//zzy, rtx ssrc
 						ice_handle->audio_stream->video_sequence_rtx = ice_handle->video_stream->video_sequence_rtx;	//zzy, rtx seq
 						ice_handle->audio_stream->video_red_payload = ice_handle->video_stream->video_red_payload;	//zzy, red payload
 						ice_handle->audio_stream->video_ulpfec_payload = ice_handle->video_stream->video_ulpfec_payload;	//zzy, fec payload
-						ice_handle->audio_stream->video_fec = ice_handle->video_stream->video_fec;	//zzy, fec
+						ice_handle->audio_stream->video_rtx_red_payload = ice_handle->video_stream->video_rtx_red_payload;
+						ice_handle->audio_stream->video_fec_enc = ice_handle->video_stream->video_fec_enc;	//zzy, fec
+						ice_handle->audio_stream->video_fec_dec = ice_handle->video_stream->video_fec_dec;	//zzy, fec
 						nice_agent_attach_recv(ice_handle->agent, ice_handle->video_stream->stream_id, 1, g_main_loop_get_context (ice_handle->iceloop), NULL, NULL);
 						if(!janus_ice_is_rtcpmux_forced())
 							nice_agent_attach_recv(ice_handle->agent, ice_handle->video_stream->stream_id, 2, g_main_loop_get_context (ice_handle->iceloop), NULL, NULL);

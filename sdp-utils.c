@@ -671,7 +671,7 @@ gint32	janus_sdp_get_red_payload(janus_sdp *sdp)
 		GList *ma = m->attributes;
 		while(ma) {
 			janus_sdp_attribute *a = (janus_sdp_attribute *)ma->data;
-			if(a->name != NULL && a->value != NULL && !strcasecmp(a->name, "rtpmap") && strstr(a->value, "red")) {
+			if(a->name != NULL && a->value != NULL && !strcasecmp(a->name, "rtpmap") && strstr(a->value, "red/90000")) {
 				gint32 red_payload = 0;
 				sscanf(a->value, "%"SCNd32" red/90000", &red_payload);
 				return red_payload;
@@ -696,7 +696,7 @@ gint32	janus_sdp_get_fec_payload(janus_sdp *sdp)
 		GList *ma = m->attributes;
 		while(ma) {
 			janus_sdp_attribute *a = (janus_sdp_attribute *)ma->data;
-			if(a->name != NULL && a->value != NULL && !strcasecmp(a->name, "rtpmap") && strstr(a->value, "fec")) {
+			if(a->name != NULL && a->value != NULL && !strcasecmp(a->name, "rtpmap") && strstr(a->value, "ulpfec/90000")) {
 				gint32 fec_payload = 0;
 				sscanf(a->value, "%"SCNd32" ulpfec/90000", &fec_payload);
 				return fec_payload;
@@ -994,6 +994,14 @@ janus_sdp *janus_sdp_generate_offer(const char *name, const char *address, ...) 
 		a = janus_sdp_attribute_create("rtpmap", "%d ulpfec/90000", fec_pt);
 		m->attributes = g_list_append(m->attributes, a);
 		
+		int rtx_red_pt = INNER_RTX_RED_PAYLOAD;
+		m->ptypes = g_list_append(m->ptypes, GINT_TO_POINTER(rtx_red_pt));
+		a = janus_sdp_attribute_create("rtpmap", "%d rtx/90000", rtx_red_pt);
+		m->attributes = g_list_append(m->attributes, a);
+		a = janus_sdp_attribute_create("fmtp", "%d apt=%d", rtx_red_pt, red_pt);
+		m->attributes = g_list_append(m->attributes, a);
+		JANUS_LOG(LOG_INFO, "[rtx]support RTX-RED with payload:%d in offer \n", rtx_red_pt);
+		
 		offer->m_lines = g_list_append(offer->m_lines, m);
 	}
 	if(do_data) {
@@ -1262,6 +1270,19 @@ janus_sdp *janus_sdp_generate_answer(janus_sdp *offer, ...) {
 					am->ptypes = g_list_append(am->ptypes, GINT_TO_POINTER(red_pt));
 					a = janus_sdp_attribute_create("rtpmap", "%d red/90000", red_pt);
 					am->attributes = g_list_append(am->attributes, a);
+				}
+				
+				//zzy, support RTX-RED
+				if (red_pt > 0) {
+					int rtx_pt = janus_sdp_get_codec_rtx_payload(offer, red_pt);
+					JANUS_LOG(LOG_INFO, "[rtx]select RTX-RED with payload:%d in answer \n", rtx_pt);
+					if (rtx_pt > 0) {
+						am->ptypes = g_list_append(am->ptypes, GINT_TO_POINTER(rtx_pt));
+						a = janus_sdp_attribute_create("rtpmap", "%d rtx/90000", rtx_pt);
+						am->attributes = g_list_append(am->attributes, a);
+						a = janus_sdp_attribute_create("fmtp", "%d apt=%d", rtx_pt, red_pt);
+						am->attributes = g_list_append(am->attributes, a);
+					}
 				}
 				
 				//zzy, support FEC

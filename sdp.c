@@ -304,6 +304,7 @@ int janus_sdp_process(void *ice_handle, janus_sdp *remote_sdp) {
 				}
 				//zzy, parse rtx payload
 				if(!strcasecmp(a->name, "fmtp") && strstr(a->value, "apt")) {
+					stream->video_support_rtx = TRUE;
 					int res = janus_sdp_parse_rtx_payload(stream, (const char *)a->value);
 					if(res != 0) {
 						JANUS_LOG(LOG_ERR, "[%"SCNu64"] Failed to parse RTX attribute... (%d)\n", handle->handle_id, res);
@@ -322,7 +323,8 @@ int janus_sdp_process(void *ice_handle, janus_sdp *remote_sdp) {
 					if(res != 0) {
 						JANUS_LOG(LOG_ERR, "[%"SCNu64"] Failed to parse FEC attribute... (%d)\n", handle->handle_id, res);
 					} else {
-						stream->video_fec = janus_fec_create();
+						stream->video_fec_enc = janus_fec_enc_create();
+						stream->video_fec_dec = janus_fec_dec_create();
 						JANUS_LOG(LOG_INFO, "[%"SCNu64"] Create FEC module\n", handle->handle_id);
 					}
 				}
@@ -602,6 +604,9 @@ int janus_sdp_parse_rtx_payload(void* ice_stream, const char* fmtp_attr) {
 	sscanf(fmtp_attr, "%"SCNd32" apt=%"SCNd32"", &rtx_payload, &original_payload);
 	JANUS_LOG(LOG_VERB, "[rtx]parse rtx pt: %"SCNd32", original pt:%"SCNd32" \n", rtx_payload, original_payload);
 	g_hash_table_insert(stream->rtx_payloads, GUINT_TO_POINTER(rtx_payload), GUINT_TO_POINTER(original_payload));
+	if (original_payload == INNER_RED_PAYLOAD) {
+		stream->video_rtx_red_payload = rtx_payload;
+	}
 	return 0;
 }
 
@@ -724,6 +729,7 @@ int janus_sdp_anonymize(janus_sdp *anon) {
 			tempA = tempA->next;
 		}
 		/* Also remove attributes/formats we know we don't support (or don't want to support) now */
+		//zzy, turn on disabled "red/ulpfec/rtx"
 #if 0
 		tempA = m->attributes;
 		GList *purged_ptypes = NULL;

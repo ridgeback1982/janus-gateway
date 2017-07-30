@@ -22,6 +22,7 @@
 #define INNER_RTX_PAYLOAD				96
 #define INNER_RED_PAYLOAD				116
 #define INNER_ULP_FEC_PAYLOAD		117
+#define INNER_RTX_RED_PAYLOAD		98
 
 /*! \brief Janus SDP internal object representation */
 typedef struct janus_sdp {
