@@ -8,9 +8,10 @@ There is three main tasks to improve its QoS:
 What I have done is implementing modules or moving from WebRTC source code to Janus:
 1. RTX support is done. The original Janus code support retransmit, but NOT RTX. I add RTX negotiating/encoding/decoding to Janus.
 2. I move WebRTC's FEC encoding code to Janus. The biggest challenge is reordering received rtp packets before doing FEC, which is not nessesary in WebRTC source code. Janus may receive disordered rtp packets from a publisher. If Janus reorder every packet before relaying it, this process will cause extra delay. So what I prefer to do is selecting a set of ordered rtp packets, to do FEC.
+3. I also move WebRTC's FEC decoding code to Janus. Now both FEC encoding/decoding is working, but it is not done. The remaining work is how to tune FEC param according to network bandwidth, and how to co-operate with RTX.
 
 What is remaining:
-1. FEC decoding
+1. optimize the FEC config
 2. good REMB
 
 
